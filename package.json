@@ -1,18 +1,19 @@
 {
-  "name": "ejs-challenge",
+  "name": "ui-diff-engine",
   "version": "1.0.0",
-  "description": "",
-  "main": "app.js",
+  "description": "Figma ↔ Browser UI diff engine with relative positioning, padding comparison and severity-graded reports",
+  "main": "compare-engine.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "extract:figma":   "node figma-extractor.js",
+    "extract:browser": "node browser-extractor.js",
+    "compare":         "node compare-engine.js",
+    "pipeline":        "node run-pipeline.js",
+    "example": "node run-pipeline.js --figma ./example/figma-export.json --url https://dss-r3.bmbdss.sit.dss.ife.ninja/sa... --out ./reports --mobile true"
   },
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "body-parser": "^1.18.3",
-    "ejs": "^2.6.1",
-    "express": "^4.16.3",
-    "lodash": "^4.17.21",
-    "mongoose": "^6.4.3"
+    "playwright": "^1.41.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
   }
 }
