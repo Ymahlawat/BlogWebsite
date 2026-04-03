@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>UI Diff Engine</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #ffffff; --bg2: #f5f5f3; --bg3: #eeede8;
+    --text: #1a1a1a; --text2: #666; --text3: #aaa;
+    --border: rgba(0,0,0,.12); --border2: rgba(0,0,0,.22);
+    --r: 8px; --rl: 12px;
+    --green: #3B6D11; --green-bg: #EAF3DE;
+    --red: #A32D2D; --red-bg: #FCEBEB;
+    --amber: #854F0B; --amber-bg: #FAEEDA;
+    --blue: #185FA5; --blue-bg: #E6F1FB;
+    --green-line: #639922; --red-line: #E24B4A; --amber-line: #BA7517; --blue-line: #378ADD;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; color: var(--text); background: var(--bg); line-height: 1.5; }
+  .page { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem; }
+  h1 { font-size: 18px; font-weight: 500; margin-bottom: 1.5rem; }
+
+  .inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .inp-panel { border: 0.5px solid var(--border); border-radius: var(--rl); padding: 1rem; }
+  .inp-label { font-size: 11px; font-weight: 500; color: var(--text2); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; display: flex; justify-content: space-between; }
+  textarea { width: 100%; height: 160px; resize: vertical; border: 0.5px solid var(--border); border-radius: var(--r); padding: 9px; font-family: "SF Mono", "Fira Code", monospace; font-size: 11.5px; background: var(--bg2); color: var(--text); outline: none; }
+  textarea:focus { border-color: var(--border2); }
+  .load-ex { font-size: 11px; color: var(--blue); cursor: pointer; text-decoration: underline; }
+
+  .actions { display: flex; gap: 8px; margin-bottom: 1.5rem; align-items: center; flex-wrap: wrap; }
+  button { padding: 7px 14px; border: 0.5px solid var(--border2); border-radius: var(--r); background: transparent; color: var(--text); cursor: pointer; font-size: 13px; }
+  button:hover { background: var(--bg2); }
+  button.primary { background: var(--text); color: var(--bg); border-color: transparent; }
+  button.primary:hover { opacity: .85; }
+  .err { color: var(--red); font-size: 12px; }
+
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 16px; }
+  .stat { background: var(--bg2); border-radius: var(--r); padding: 12px 8px; text-align: center; }
+  .stat-n { font-size: 24px; font-weight: 500; }
+  .stat-l { font-size: 11px; color: var(--text2); margin-top: 2px; }
+  .s0 .stat-n { color: var(--green-line); }
+  .s1 .stat-n { color: var(--red-line); }
+  .s2 .stat-n { color: var(--amber-line); }
+  .s3 .stat-n { color: var(--blue-line); }
+  .s4 .stat-n { color: var(--text); }
+
+  .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .chart-box { border: 0.5px solid var(--border); border-radius: var(--rl); padding: 1rem; }
+  .chart-label { font-size: 11px; font-weight: 500; color: var(--text2); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 10px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; font-size: 11px; color: var(--text2); }
+  .leg-dot { width: 9px; height: 9px; border-radius: 2px; display: inline-block; margin-right: 4px; }
+
+  .filters { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .filter-btn { padding: 5px 12px; border: 0.5px solid var(--border); border-radius: 20px; font-size: 12px; cursor: pointer; background: transparent; color: var(--text2); }
+  .filter-btn:hover { background: var(--bg2); }
+  .filter-btn.active { border-color: var(--border2); color: var(--text); background: var(--bg2); }
+  .filter-btn.f-match.active { background: var(--green-bg); color: var(--green); border-color: var(--green-line); }
+  .filter-btn.f-diff.active { background: var(--red-bg); color: var(--red); border-color: var(--red-line); }
+  .filter-btn.f-miss.active { background: var(--amber-bg); color: var(--amber); border-color: var(--amber-line); }
+  .filter-btn.f-extra.active { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-line); }
+
+  .report { border: 0.5px solid var(--border); border-radius: var(--rl); overflow: hidden; }
+  .report-hdr { padding: 10px 14px; border-bottom: 0.5px solid var(--border); font-size: 12px; color: var(--text2); display: flex; justify-content: space-between; align-items: center; }
+  .report-hdr input { border: 0.5px solid var(--border); border-radius: var(--r); padding: 5px 10px; font-size: 12px; background: var(--bg2); color: var(--text); outline: none; width: 200px; }
+
+  .row { border-bottom: 0.5px solid var(--border); padding: 10px 14px; display: grid; grid-template-columns: 24px minmax(0,2fr) 90px minmax(0,3fr); gap: 10px; align-items: start; cursor: pointer; }
+  .row:last-child { border-bottom: none; }
+  .row:hover, .row.expanded { background: var(--bg2); }
+  .chevron { font-size: 9px; color: var(--text3); transition: transform .15s; user-select: none; padding-top: 3px; }
+  .row.expanded .chevron { transform: rotate(90deg); }
+  .row-name { font-size: 13px; font-weight: 500; word-break: break-all; }
+  .row-type { font-size: 11px; color: var(--text2); margin-top: 1px; }
+  .row-summary { font-size: 12px; color: var(--text2); }
+
+  .badge { display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+  .b-match { background: var(--green-bg); color: var(--green); }
+  .b-diff   { background: var(--red-bg);   color: var(--red); }
+  .b-miss   { background: var(--amber-bg); color: var(--amber); }
+  .b-extra  { background: var(--blue-bg);  color: var(--blue); }
+
+  .detail { display: none; background: var(--bg2); border-bottom: 0.5px solid var(--border); padding: 12px 14px 12px calc(14px + 24px + 10px); }
+  .detail.open { display: block; }
+
+  .diff-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .diff-table th { text-align: left; color: var(--text2); font-weight: 500; padding: 4px 8px 6px 0; border-bottom: 0.5px solid var(--border); font-size: 11px; }
+  .diff-table td { padding: 5px 8px 5px 0; vertical-align: top; font-family: "SF Mono", "Fira Code", monospace; font-size: 11.5px; }
+  .diff-table tr:last-child td { border-bottom: none; }
+  .val-old { color: var(--red-line); text-decoration: line-through; }
+  .val-new { color: var(--green-line); }
+  .val-ok  { color: var(--green-line); }
+
+  .empty { color: var(--text3); font-size: 13px; text-align: center; padding: 3rem 0; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; border: 0.5px solid rgba(0,0,0,.15); vertical-align: middle; margin-right: 4px; }
+
+  @media print {
+    .actions, .inputs, .filters, .report-hdr input { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>UI diff engine</h1>
+
+  <div class="inputs">
+    <div class="inp-panel">
+      <div class="inp-label">
+        <span>Source A — design JSON (Figma / Penpot / Zeplin)</span>
+        <span class="load-ex" onclick="loadSingle('a')">load example</span>
+      </div>
+      <textarea id="inp-a" placeholder='Paste any JSON with named nodes. Supports: Figma REST API exports, Penpot, Zeplin, or a custom schema with keys: name, type, fills, style, cornerRadius, children...'></textarea>
+    </div>
+    <div class="inp-panel">
+      <div class="inp-label">
+        <span>Source B — browser JSON (Playwright / DevTools)</span>
+        <span class="load-ex" onclick="loadSingle('b')">load example</span>
+      </div>
+      <textarea id="inp-b" placeholder='Paste output from the Playwright extractor or any component tree JSON. Keys: name, type, fills, style, cornerRadius, children...'></textarea>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="primary" onclick="runEngine()">Run comparison</button>
+    <button onclick="loadExample()">Load example data</button>
+    <button onclick="clearAll()">Clear</button>
+    <button onclick="window.print()">Print / export PDF</button>
+    <span id="err" class="err"></span>
+  </div>
+
+  <div id="output"></div>
+</div>
+
+<script>
+const EX_A = { document: { name: "Design system v2", children: [
+  { name:"Button/Primary",    type:"BUTTON", fills:[{color:{r:.2,g:.4,b:1,a:1}}],        style:{fontSize:16,fontWeight:"600",fontFamily:"Inter",letterSpacing:0}, cornerRadius:8 },
+  { name:"Button/Secondary",  type:"BUTTON", fills:[{color:{r:1,g:1,b:1,a:1}}],          style:{fontSize:16,fontWeight:"400",fontFamily:"Inter"}, cornerRadius:8 },
+  { name:"Card/Default",      type:"CARD",   fills:[{color:{r:1,g:1,b:1,a:1}}],          style:{fontSize:14}, cornerRadius:12 },
+  { name:"Input/Text",        type:"INPUT",  fills:[{color:{r:.96,g:.96,b:.96,a:1}}],    style:{fontSize:14,fontWeight:"400",fontFamily:"Inter"}, cornerRadius:6 },
+  { name:"NavBar",            type:"FRAME",  fills:[{color:{r:.08,g:.08,b:.1,a:1}}],     style:{fontSize:16,fontWeight:"500"}, cornerRadius:0 },
+  { name:"Badge/Success",     type:"BADGE",  fills:[{color:{r:.87,g:.97,b:.87,a:1}}],    style:{fontSize:12,fontWeight:"500"}, cornerRadius:20 },
+  { name:"Modal/Overlay",     type:"MODAL",  fills:[{color:{r:0,g:0,b:0,a:.5}}],         style:{fontSize:14}, cornerRadius:16 },
+  { name:"Avatar/Circle",     type:"FRAME",  fills:[{color:{r:.8,g:.5,b:.9,a:1}}],       style:{fontSize:14,fontWeight:"500"}, cornerRadius:999 }
+]}};
+
+const EX_B = { document: { name: "Live page — chrome extraction", children: [
+  { name:"Button/Primary",    type:"BUTTON", fills:[{color:{r:.2,g:.4,b:.82,a:1}}],      style:{fontSize:14,fontWeight:"600",fontFamily:"Inter",letterSpacing:.02}, cornerRadius:8 },
+  { name:"Button/Secondary",  type:"BUTTON", fills:[{color:{r:1,g:1,b:1,a:1}}],          style:{fontSize:16,fontWeight:"400",fontFamily:"Inter"}, cornerRadius:8 },
+  { name:"Card/Default",      type:"CARD",   fills:[{color:{r:1,g:1,b:1,a:1}}],          style:{fontSize:14}, cornerRadius:8 },
+  { name:"Input/Text",        type:"INPUT",  fills:[{color:{r:.96,g:.96,b:.96,a:1}}],    style:{fontSize:14,fontWeight:"400",fontFamily:"Inter"}, cornerRadius:6 },
+  { name:"NavBar",            type:"FRAME",  fills:[{color:{r:.08,g:.08,b:.1,a:1}}],     style:{fontSize:14,fontWeight:"500"}, cornerRadius:0 },
+  { name:"Toast/Info",        type:"BADGE",  fills:[{color:{r:.87,g:.94,b:1,a:1}}],      style:{fontSize:12,fontWeight:"400"}, cornerRadius:8 },
+  { name:"Tooltip",           type:"FRAME",  fills:[{color:{r:.1,g:.1,b:.1,a:.9}}],      style:{fontSize:12}, cornerRadius:4 }
+]}};
+
+function colorToHex(c) {
+  if (!c) return null;
+  return '#'+[c.r,c.g,c.b].map(v=>Math.round((v||0)*255).toString(16).padStart(2,'0')).join('');
+}
+
+function colorDist(c1,c2) {
+  if(!c1||!c2) return 1;
+  return Math.sqrt(Math.pow(c1.r-c2.r,2)+Math.pow(c1.g-c2.g,2)+Math.pow(c1.b-c2.b,2));
+}
+
+function flattenNodes(json) {
+  const nodes = {};
+  function walk(obj) {
+    if (!obj || typeof obj !== 'object') return;
+    if (Array.isArray(obj)) { obj.forEach(walk); return; }
+    if (obj.name) nodes[obj.name] = obj;
+    for (const k of ['children','components','nodes','items','elements']) if(obj[k]) walk(obj[k]);
+  }
+  walk(json);
+  return nodes;
+}
+
+function getProps(node) {
+  const p = {};
+  if (node.fills && node.fills[0] && node.fills[0].color) {
+    p.fillColor = { raw: node.fills[0].color, hex: colorToHex(node.fills[0].color) };
+  }
+  if (node.style) {
+    ['fontSize','fontWeight','fontFamily','letterSpacing','lineHeight','opacity'].forEach(k => {
+      if (node.style[k] != null) p[k] = node.style[k];
+    });
+  }
+  if (node.cornerRadius != null) p.cornerRadius = node.cornerRadius;
+  if (node.absoluteBoundingBox) {
+    p.width = node.absoluteBoundingBox.width;
+    p.height = node.absoluteBoundingBox.height;
+  }
+  return p;
+}
+
+function compareProps(pa, pb) {
+  const diffs = [];
+  const keys = new Set([...Object.keys(pa),...Object.keys(pb)]);
+  for (const k of keys) {
+    const inA = k in pa, inB = k in pb;
+    if (!inA) {
+      diffs.push({key:k, aVal:null, bVal: k==='fillColor'?pb[k].hex:pb[k], status:'extra'});
+    } else if (!inB) {
+      diffs.push({key:k, aVal: k==='fillColor'?pa[k].hex:pa[k], bVal:null, status:'missing'});
+    } else if (k==='fillColor') {
+      const dist = colorDist(pa[k].raw, pb[k].raw);
+      diffs.push({key:'fillColor', aVal:pa[k].hex, bVal:pb[k].hex, status: dist>0.03?'changed':'ok', dist});
+    } else {
+      const av=pa[k], bv=pb[k];
+      if (typeof av==='number'&&typeof bv==='number') {
+        const delta=Math.abs(av-bv);
+        diffs.push({key:k, aVal:av, bVal:bv, status: delta>0.5?'changed':'ok', delta});
+      } else if (JSON.stringify(av)!==JSON.stringify(bv)) {
+        diffs.push({key:k, aVal:String(av), bVal:String(bv), status:'changed'});
+      } else {
+        diffs.push({key:k, aVal:av, bVal:bv, status:'ok'});
+      }
+    }
+  }
+  return diffs;
+}
+
+let lastResults=null, activeFilter='all', searchQuery='', charts=[];
+
+function runEngine() {
+  document.getElementById('err').textContent='';
+  const aStr=document.getElementById('inp-a').value.trim();
+  const bStr=document.getElementById('inp-b').value.trim();
+  if(!aStr||!bStr){document.getElementById('err').textContent='Paste JSON in both panels first.';return;}
+  let aJson,bJson;
+  try{aJson=JSON.parse(aStr);}catch(e){document.getElementById('err').textContent='Source A error: '+e.message;return;}
+  try{bJson=JSON.parse(bStr);}catch(e){document.getElementById('err').textContent='Source B error: '+e.message;return;}
+
+  const aNodes=flattenNodes(aJson), bNodes=flattenNodes(bJson);
+  const allNames=new Set([...Object.keys(aNodes),...Object.keys(bNodes)]);
+  const results=[];
+
+  for (const name of allNames) {
+    if (aNodes[name]&&bNodes[name]) {
+      const propDiffs=compareProps(getProps(aNodes[name]),getProps(bNodes[name]));
+      const changed=propDiffs.filter(d=>d.status!=='ok');
+      results.push({name, type:aNodes[name].type||bNodes[name].type||'FRAME', status:changed.length?'diff':'match', diffs:propDiffs, changedCount:changed.length});
+    } else if (aNodes[name]) {
+      results.push({name, type:aNodes[name].type||'FRAME', status:'missing', diffs:[], changedCount:0});
+    } else {
+      results.push({name, type:bNodes[name].type||'FRAME', status:'extra', diffs:[], changedCount:0});
+    }
+  }
+
+  lastResults=results; activeFilter='all'; searchQuery='';
+  renderReport(results);
+}
+
+function renderReport(results) {
+  const out=document.getElementById('output');
+  if(!results||!results.length){out.innerHTML='<div class="empty">No components found.</div>';return;}
+  const C={match:0,diff:0,missing:0,extra:0};
+  results.forEach(r=>C[r.status]++);
+  const total=results.length;
+  const score=Math.round((C.match/total)*100);
+  charts.forEach(c=>c.destroy()); charts=[];
+
+  const filtered=results.filter(r=>{
+    if(activeFilter!=='all'&&r.status!==activeFilter) return false;
+    if(searchQuery&&!r.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    return true;
+  });
+
+  let html=`
+  <div class="stats">
+    <div class="stat s0"><div class="stat-n">${C.match}</div><div class="stat-l">Matching</div></div>
+    <div class="stat s1"><div class="stat-n">${C.diff}</div><div class="stat-l">Differences</div></div>
+    <div class="stat s2"><div class="stat-n">${C.missing}</div><div class="stat-l">Missing in B</div></div>
+    <div class="stat s3"><div class="stat-n">${C.extra}</div><div class="stat-l">Extra in B</div></div>
+    <div class="stat s4"><div class="stat-n">${score}%</div><div class="stat-l">Fidelity score</div></div>
+  </div>
+  <div class="chart-row">
+    <div class="chart-box">
+      <div class="chart-label">Component status</div>
+      <div style="position:relative;height:180px"><canvas id="chart-pie"></canvas></div>
+      <div class="legend">
+        <span><span class="leg-dot" style="background:#639922"></span>Match ${C.match}</span>
+        <span><span class="leg-dot" style="background:#E24B4A"></span>Diff ${C.diff}</span>
+        <span><span class="leg-dot" style="background:#BA7517"></span>Missing ${C.missing}</span>
+        <span><span class="leg-dot" style="background:#378ADD"></span>Extra ${C.extra}</span>
+      </div>
+    </div>
+    <div class="chart-box">
+      <div class="chart-label">Top components with most diffs</div>
+      <div style="position:relative;height:180px"><canvas id="chart-bar"></canvas></div>
+    </div>
+  </div>
+  <div class="filters">
+    <button class="filter-btn f-all ${activeFilter==='all'?'active':''}" onclick="setFilter('all')">All (${total})</button>
+    <button class="filter-btn f-diff ${activeFilter==='diff'?'active':''}" onclick="setFilter('diff')">Different (${C.diff})</button>
+    <button class="filter-btn f-miss ${activeFilter==='missing'?'active':''}" onclick="setFilter('missing')">Missing in B (${C.missing})</button>
+    <button class="filter-btn f-extra ${activeFilter==='extra'?'active':''}" onclick="setFilter('extra')">Extra in B (${C.extra})</button>
+    <button class="filter-btn f-match ${activeFilter==='match'?'active':''}" onclick="setFilter('match')">Matching (${C.match})</button>
+  </div>
+  <div class="report">
+    <div class="report-hdr">
+      <span>${filtered.length} of ${total} components shown</span>
+      <input type="text" placeholder="Search by name..." value="${searchQuery}" oninput="doSearch(this.value)" />
+    </div>`;
+
+  filtered.forEach((r,i)=>{
+    const bMap={match:'b-match',diff:'b-diff',missing:'b-miss',extra:'b-extra'};
+    const bLabel={match:'match',diff:'diff',missing:'missing in B',extra:'extra in B'};
+    const summary=r.status==='diff'?`${r.changedCount} propert${r.changedCount===1?'y':'ies'} differ`
+      :r.status==='missing'?'not found in browser JSON'
+      :r.status==='extra'?'not in design JSON'
+      :'all properties match';
+
+    html+=`<div class="row" id="row-${i}" onclick="toggle(${i})">
+      <span class="chevron" id="chev-${i}">&#9654;</span>
+      <div><div class="row-name">${esc(r.name)}</div><div class="row-type">${r.type}</div></div>
+      <span class="badge ${bMap[r.status]}">${bLabel[r.status]}</span>
+      <span class="row-summary">${summary}</span>
+    </div>
+    <div class="detail" id="det-${i}">`;
+
+    if(r.diffs&&r.diffs.length){
+      html+=`<table class="diff-table"><thead><tr><th>Property</th><th>Design (A)</th><th>Browser (B)</th><th>Status</th></tr></thead><tbody>`;
+      r.diffs.forEach(d=>{
+        const isColor=d.key==='fillColor';
+        const swatchA=isColor&&d.aVal?`<span class="swatch" style="background:${d.aVal}"></span>`:'';
+        const swatchB=isColor&&d.bVal?`<span class="swatch" style="background:${d.bVal}"></span>`:'';
+        const aDisp=d.aVal==null?'<span style="color:#aaa">—</span>':`${swatchA}<span class="${d.status!=='ok'?'val-old':''}">${esc(String(d.aVal))}</span>`;
+        const bDisp=d.bVal==null?'<span style="color:#aaa">—</span>':`${swatchB}<span class="${d.status==='changed'||d.status==='extra'?'val-new':''}">${esc(String(d.bVal))}</span>`;
+        const note=d.status==='ok'?'<span class="val-ok">ok</span>'
+          :d.status==='changed'?`<span style="color:#E24B4A">changed</span>${d.delta!=null?' delta '+d.delta.toFixed(d.key==='fillColor'?3:1):''}`
+          :d.status==='missing'?'<span style="color:#BA7517">only in A</span>'
+          :'<span style="color:#378ADD">only in B</span>';
+        html+=`<tr><td>${d.key}</td><td>${aDisp}</td><td>${bDisp}</td><td>${note}</td></tr>`;
+      });
+      html+=`</tbody></table>`;
+    } else if(r.status==='missing'){
+      html+=`<span style="font-size:12px;color:#888">Component exists in design JSON but was not found in browser extraction.</span>`;
+    } else if(r.status==='extra'){
+      html+=`<span style="font-size:12px;color:#888">Component found in browser but has no counterpart in design JSON.</span>`;
+    } else {
+      html+=`<span style="font-size:12px;color:#3B6D11">All compared properties are identical.</span>`;
+    }
+    html+=`</div>`;
+  });
+
+  html+=`</div>`;
+  out.innerHTML=html;
+
+  const pie=document.getElementById('chart-pie');
+  if(pie) charts.push(new Chart(pie,{type:'doughnut',data:{labels:['Match','Diff','Missing','Extra'],datasets:[{data:[C.match,C.diff,C.missing,C.extra],backgroundColor:['#639922','#E24B4A','#BA7517','#378ADD'],borderWidth:0,hoverOffset:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},cutout:'68%'}}));
+
+  const topDiff=results.filter(r=>r.status==='diff').sort((a,b)=>b.changedCount-a.changedCount).slice(0,6);
+  const bar=document.getElementById('chart-bar');
+  if(bar&&topDiff.length) charts.push(new Chart(bar,{type:'bar',data:{labels:topDiff.map(r=>r.name.length>18?r.name.slice(0,18)+'…':r.name),datasets:[{label:'Diffs',data:topDiff.map(r=>r.changedCount),backgroundColor:'#E24B4A',borderRadius:4,borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{stepSize:1,color:'#888',font:{size:11}},grid:{color:'rgba(0,0,0,.07)'}},y:{ticks:{color:'#888',font:{size:11}},grid:{display:false}}}}}));
+}
+
+function toggle(i){
+  const det=document.getElementById('det-'+i), row=document.getElementById('row-'+i);
+  const open=det.classList.toggle('open');
+  row.classList.toggle('expanded',open);
+}
+function setFilter(f){activeFilter=f;if(lastResults)renderReport(lastResults);}
+function doSearch(v){searchQuery=v;if(lastResults)renderReport(lastResults);}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function loadExample(){document.getElementById('inp-a').value=JSON.stringify(EX_A,null,2);document.getElementById('inp-b').value=JSON.stringify(EX_B,null,2);}
+function loadSingle(s){document.getElementById('inp-'+s).value=JSON.stringify(s==='a'?EX_A:EX_B,null,2);}
+function clearAll(){document.getElementById('inp-a').value='';document.getElementById('inp-b').value='';document.getElementById('output').innerHTML='';document.getElementById('err').textContent='';lastResults=null;charts.forEach(c=>c.destroy());charts=[];}
+</script>
+</body>
+</html>
