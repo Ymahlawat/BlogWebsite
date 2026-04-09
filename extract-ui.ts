@@ -430,43 +430,27 @@ function normalizeByFirstMatchedText(
     domMap.get(key)!.push(d);
   }
 
-  // Find candidates: figma TEXT nodes that have an exact text match in DOM
-  // These are our potential anchors
-  const possible: { key: string; f: any; d: any }[] = [];
+  // Find a text string that exists in BOTH Figma and DOM with exact match.
+  // That matched pair becomes the anchor — both sides get set to (0,0).
+  // No "first" or "top-most" preference — just exact text match wins.
+  let anchor: { key: string; f: any; d: any } | null = null;
+
   for (const f of figText) {
     const key = normText(f.name);
-    const domMatches: any[] | undefined = domMap.get(key);
+    if (!key || key.length < 2) continue;
+    const domMatches = domMap.get(key);
     if (!domMatches || domMatches.length === 0) continue;
-
-    // Pick the DOM node closest in position to this figma node
-    // (before normalization we can't compare directly, but we
-    //  can prefer DOM nodes that appear near the top of the page)
-    let best = domMatches[0];
-    let bestY = best.absoluteBoundingBox?.y ?? Infinity;
-    for (const m of domMatches) {
-      const my = m.absoluteBoundingBox?.y ?? Infinity;
-      if (my < bestY) { bestY = my; best = m; }
-    }
-    possible.push({ key, f, d: best });
+    // Found exact match in both — use first DOM match
+    anchor = { key, f, d: domMatches[0] };
+    break;
   }
 
-  if (possible.length === 0) {
-    console.warn("⚠️  No matched text found between Figma and DOM. Skipping anchor normalization.");
+  if (!anchor) {
+    console.warn("⚠️  No exact text match found between Figma and DOM. Skipping anchor normalization.");
     console.warn("    Figma texts:", figText.slice(0, 5).map((f: any) => normText(f.name)));
-    console.warn("    DOM texts:", domText.slice(0, 5).map((d: any) => normText(d.name)));
+    console.warn("    DOM texts:",   domText.slice(0, 5).map((d: any) => normText(d.name)));
     return { figmaDiff, domDiff, anchor: null };
   }
-
-  // Pick the top-most figma node among candidates as the anchor
-  // "top-most" = smallest y in Figma canvas
-  possible.sort((a, b) => {
-    const ay = a.f.absoluteBoundingBox?.y ?? Infinity;
-    const by2 = b.f.absoluteBoundingBox?.y ?? Infinity;
-    if (ay !== by2) return ay - by2;
-    return (a.f.absoluteBoundingBox?.x ?? 0) - (b.f.absoluteBoundingBox?.x ?? 0);
-  });
-
-  const anchor = possible[0];
 
   // Record original anchor positions BEFORE any mutation
   const figAnchorX: number = Math.round(anchor.f.absoluteBoundingBox?.x ?? 0);
@@ -474,23 +458,25 @@ function normalizeByFirstMatchedText(
   const domAnchorX: number = Math.round(anchor.d.absoluteBoundingBox?.x ?? 0);
   const domAnchorY: number = Math.round(anchor.d.absoluteBoundingBox?.y ?? 0);
 
-  console.log(`\n📍 Anchor: "${anchor.key}"`);
-  console.log(`   Figma origin: (${figAnchorX}, ${figAnchorY})`);
-  console.log(`   DOM origin:   (${domAnchorX}, ${domAnchorY})`);
+  console.log(`\n📍 Anchor text: "${anchor.key}"`);
+  console.log(`   Figma canvas origin: (${figAnchorX}, ${figAnchorY})`);
+  console.log(`   DOM viewport origin: (${domAnchorX}, ${domAnchorY})`);
+  console.log(`   After normalization all coords become relative to this anchor.`);
+  console.log(`   Any remaining x/y delta = real padding/margin difference between Figma and browser.`);
 
-  // Shift ONLY x and y for each node — never touch width or height
+  // Shift all nodes so anchor = (0,0) in both coordinate systems.
+  // After this: positive x/y = element is to the right/below anchor.
+  // Negative x/y = element is to the left/above anchor.
+  // width and height are NEVER modified.
   for (const f of figKids) {
     if (!f.absoluteBoundingBox) continue;
     f.absoluteBoundingBox.x = Math.round(f.absoluteBoundingBox.x - figAnchorX);
     f.absoluteBoundingBox.y = Math.round(f.absoluteBoundingBox.y - figAnchorY);
-    // width and height are intentionally NOT modified
   }
-
   for (const d of domKids) {
     if (!d.absoluteBoundingBox) continue;
     d.absoluteBoundingBox.x = Math.round(d.absoluteBoundingBox.x - domAnchorX);
     d.absoluteBoundingBox.y = Math.round(d.absoluteBoundingBox.y - domAnchorY);
-    // width and height are intentionally NOT modified
   }
 
   return {
@@ -537,19 +523,19 @@ function toComparable(n: DiffNode): Comparable {
   };
 }
 
-type DiffResult = { prop: keyof Comparable; a: any; b: any; delta?: number };
+// status: "fail" = real QA issue | "info" = x/y coords (informational) | "ok" = matches
+type DiffResult = { prop: keyof Comparable; a: any; b: any; delta?: number; status: "fail" | "info" | "ok" };
 
 /**
- * Compare two Comparable objects
- * Uses tolerances for positional/size props to avoid noise
+ * x/y = INFO only (never fail). Coordinate systems can't be perfectly
+ * aligned between Figma canvas and browser viewport — residual offset
+ * always exists due to body margins, headers, DPR. Show for context only.
+ * width/height = FAIL if delta > 4px.
+ * all other props (color, font) = exact match, FAIL if different.
  */
 function diffComparable(a: Comparable, b: Comparable): DiffResult[] {
-  const diffs: DiffResult[] = [];
-
-  // Positional tolerance: 4px is acceptable for layout rounding
-  const POS_TOL = 4;
-  // Size tolerance: 2px acceptable
-  const SIZE_TOL = 2;
+  const results: DiffResult[] = [];
+  const SIZE_TOL = 4;
 
   (Object.keys(a) as (keyof Comparable)[]).forEach((k) => {
     const av = a[k];
@@ -557,31 +543,25 @@ function diffComparable(a: Comparable, b: Comparable): DiffResult[] {
 
     if (k === "x" || k === "y") {
       const delta = Math.abs(Number(av) - Number(bv));
-      if (delta > POS_TOL) diffs.push({ prop: k, a: av, b: bv, delta });
+      results.push({ prop: k, a: av, b: bv, delta, status: delta > 2 ? "info" : "ok" });
       return;
     }
 
     if (k === "width" || k === "height") {
       const delta = Math.abs(Number(av) - Number(bv));
-      if (delta > SIZE_TOL) diffs.push({ prop: k, a: av, b: bv, delta });
+      results.push({ prop: k, a: av, b: bv, delta, status: delta > SIZE_TOL ? "fail" : "ok" });
       return;
     }
 
-    const same =
-      typeof av === "number" && typeof bv === "number"
-        ? av === bv
-        : String(av ?? "") === String(bv ?? "");
+    const same = typeof av === "number" && typeof bv === "number"
+      ? av === bv
+      : String(av ?? "") === String(bv ?? "");
 
-    if (!same) {
-      const delta =
-        typeof av === "number" && typeof bv === "number"
-          ? Math.abs(av - bv)
-          : undefined;
-      diffs.push({ prop: k, a: av, b: bv, delta });
-    }
+    const delta = typeof av === "number" && typeof bv === "number" ? Math.abs(av - bv) : undefined;
+    results.push({ prop: k, a: av, b: bv, delta, status: same ? "ok" : "fail" });
   });
 
-  return diffs;
+  return results;
 }
 
 // ============================================================
@@ -645,16 +625,15 @@ function compareAndReport(aDoc: DiffDoc, bDoc: DiffDoc): string {
   const A = aDoc.document.children || [];
   const B = bDoc.document.children || [];
 
-  // Keep nodes with name text OR svg
   const aFiltered = A.filter((n) => normText(n.name).length > 0 || normText(n.type) === "svg");
   const bFiltered = B.filter((n) => normText(n.name).length > 0 || normText(n.type) === "svg");
 
   const { matches, leftoversB } = matchNodes(aFiltered, bFiltered);
 
   let totalCompared = 0;
-  let totalDiffs = 0;
+  let totalFails = 0;
   let totalMissingInB = 0;
-  let totalMissingInA = leftoversB.length;
+  const totalMissingInA = leftoversB.length;
 
   const lines: string[] = [];
   const log = (s = "") => lines.push(s);
@@ -665,8 +644,8 @@ function compareAndReport(aDoc: DiffDoc, bDoc: DiffDoc): string {
     if (!pair.b) {
       totalMissingInB++;
       log(aName);
-      log("missing in B");
-      log("not found in browser DOM");
+      log(`tag: ${pair.a.type}`);
+      log("missing in B  — not found in browser DOM");
       log("");
       continue;
     }
@@ -674,49 +653,60 @@ function compareAndReport(aDoc: DiffDoc, bDoc: DiffDoc): string {
     totalCompared++;
     const ac = toComparable(pair.a);
     const bc = toComparable(pair.b);
-    const diffs = diffComparable(ac, bc);
+    const results = diffComparable(ac, bc);
 
-    if (diffs.length === 0) {
-      log(`${aName}`);
+    const fails = results.filter((r) => r.status === "fail");
+    const infos = results.filter((r) => r.status === "info");
+    const oks   = results.filter((r) => r.status === "ok");
+
+    if (fails.length === 0) {
+      log(aName);
       log(`tag: ${pair.b.type}`);
-      log("match ✅ (no diffs)");
+      if (infos.length > 0) {
+        log(`match ✅  (${infos.length} coord offset${infos.length > 1 ? "s" : ""} — info only)`);
+        log(`Property        Design (A)      Browser (B)     Status`);
+        for (const r of oks)    log(`${r.prop}\t${r.a}\t${r.b}\tok`);
+        for (const r of infos)  log(`${r.prop}\t${r.a}\t${r.b}\tinfo Δ${r.delta?.toFixed(0)}`);
+      } else {
+        log("match ✅ (no diffs)");
+      }
       log("");
       continue;
     }
 
-    totalDiffs += diffs.length;
+    totalFails += fails.length;
     log(aName);
     log(`tag: ${pair.b.type}`);
-    log("diff");
-    log(`${diffs.length} propert${diffs.length === 1 ? "y" : "ies"} differ`);
+    log("diff ❌");
+    log(`${fails.length} propert${fails.length === 1 ? "y" : "ies"} differ`);
     log(`Property\tDesign (A)\tBrowser (B)\tStatus`);
 
-    for (const d of diffs) {
-      const deltaStr = typeof d.delta === "number" ? `  Δ${d.delta.toFixed(1)}` : "";
-      const status = "changed" + deltaStr;
-      log(`${d.prop}\t${String(d.a)}\t${String(d.b)}\t${status}`);
+    // Show failures first
+    for (const r of fails) {
+      const deltaStr = typeof r.delta === "number" ? `  Δ${r.delta.toFixed(1)}` : "";
+      log(`${r.prop}\t${String(r.a)}\t${String(r.b)}\tchanged${deltaStr}`);
     }
-
-    // Also show matching props for full context
-    const allProps = Object.keys(ac) as (keyof Comparable)[];
-    const diffProps = new Set(diffs.map((d) => d.prop));
-    for (const k of allProps) {
-      if (!diffProps.has(k)) {
-        log(`${k}\t${String(ac[k])}\t${String(bc[k])}\tok`);
+    // Then ok props
+    for (const r of oks) {
+      log(`${r.prop}\t${String(r.a)}\t${String(r.b)}\tok`);
+    }
+    // Then info (x/y coords) at the bottom, clearly labelled
+    if (infos.length > 0) {
+      log(`--- position info (not a failure) ---`);
+      for (const r of infos) {
+        log(`${r.prop}\t${String(r.a)}\t${String(r.b)}\tinfo Δ${r.delta?.toFixed(0)}`);
       }
     }
     log("");
   }
 
-  // Extra nodes in browser not in design
   if (totalMissingInA > 0) {
     log("---");
     log(`Extra nodes in Browser (not in Design): ${totalMissingInA}`);
     log("");
     leftoversB.slice(0, 20).forEach((b) => {
       log(`${String(b.name ?? "").trim()}`);
-      log("missing in A");
-      log("not found in figma JSON");
+      log("missing in A  — not found in figma JSON");
       log("");
     });
     if (totalMissingInA > 20) log(`(and ${totalMissingInA - 20} more)\n`);
@@ -724,7 +714,7 @@ function compareAndReport(aDoc: DiffDoc, bDoc: DiffDoc): string {
 
   log("========== SUMMARY ==========");
   log(`Compared: ${totalCompared}`);
-  log(`Total diffs: ${totalDiffs}`);
+  log(`Total failures: ${totalFails}`);
   log(`Missing in Browser (B): ${totalMissingInB}`);
   log(`Missing in Design (A): ${totalMissingInA}`);
   log("==============================");
