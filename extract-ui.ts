@@ -1,4 +1,19 @@
-# CLAUDE.md — mca-eps-savings-acc-open
+# Step 1: Initialize and get a session ID
+curl -X POST http://localhost:3845/mcpcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}'
+
+# Step 2: Use the returned sessionId in subsequent requests
+curl -X POST http://localhost:3845/mcpcp \
+  -H "Content-Type: application/json" \
+  -H "X-Session-Id: <id from step 1>" \
+  -d '{"jsonrpc":"2.0","method":"your_method","params":{},"id":2}'
+
+
+
+
+
+u# CLAUDE.md — mca-eps-savings-acc-open
 
 ## What This File Is
 Single source of truth for Claude Code on this repo.
