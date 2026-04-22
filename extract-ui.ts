@@ -1,3 +1,12 @@
+curl -X POST "http://127.0.0.1:3845/messages?sessionId=b0e842d3-184a-4075-8d10-f279c7e4d2c5" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
+
+
+curl -X POST "http://127.0.0.1:3845/messages?sessionId=b0e842d3-184a-4075-8d10-f279c7e4d2c5" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}'
+
 # Step 1: Initialize and get a session ID
 curl -X POST http://localhost:3845/mcpcp \
   -H "Content-Type: application/json" \
